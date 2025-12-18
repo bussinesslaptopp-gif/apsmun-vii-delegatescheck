@@ -4,14 +4,36 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import JSZip from 'jszip';
-import QRCodeStyling, { type ErrorCorrectionLevel } from 'qr-code-styling';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { toPng } from 'html-to-image';
 import { Download, Loader2, ArrowLeft } from 'lucide-react';
+import QRCode from 'react-qr-code';
 
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import type { Delegate } from '@/lib/types';
 import { QrCodeDisplay } from '@/components/qr-code-display';
 import { logoUrl } from '@/app/page';
+
+// This is a helper component used only for server-side rendering to an image.
+const QrCodeForImageGeneration = ({ value }: { value: string }) => (
+    <div style={{ background: 'white', padding: '16px', display: 'inline-block' }}>
+      <div style={{ position: 'relative', width: 256, height: 256 }}>
+        <QRCode value={value} size={256} level="H" />
+         <div style={{
+            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+            background: 'white', padding: '5px', borderRadius: '50%',
+        }}>
+            <img 
+                src={logoUrl} alt="logo" 
+                style={{ width: 40, height: 40, borderRadius: '50%' }} 
+                crossOrigin="anonymous"
+            />
+        </div>
+      </div>
+    </div>
+);
+
 
 export default function VerifyPage() {
   const [delegates, setDelegates] = useState<Delegate[]>([]);
@@ -46,46 +68,43 @@ export default function VerifyPage() {
     setDownloadProgress(`(0/${delegates.length})`);
     toast({
         title: "Generating ZIP...",
-        description: `Processing ${delegates.length} QR codes. Please wait.`,
+        description: `Processing ${delegates.length} QR codes. This may take a moment.`,
     });
 
     const zip = new JSZip();
     const delegatesWithQr = delegates.filter(d => d.DelegateNo);
 
+    // Create a hidden div to render the QR codes for image generation
+    const container = document.createElement('div');
+    container.style.position = 'absolute';
+    container.style.left = '-9999px';
+    document.body.appendChild(container);
+
     try {
       for (let i = 0; i < delegatesWithQr.length; i++) {
         const delegate = delegatesWithQr[i];
         
-        const qrCode = new QRCodeStyling({
-            width: 300,
-            height: 300,
-            type: 'png',
-            data: delegate.DelegateNo,
-            image: logoUrl,
-            dotsOptions: { color: '#000000', type: 'dots' },
-            backgroundOptions: { color: '#ffffff' },
-            imageOptions: {
-              crossOrigin: 'anonymous',
-              hideBackgroundDots: true,
-              imageSize: 0.4,
-              margin: 5,
-            },
-            qrOptions: { errorCorrectionLevel: 'H' as ErrorCorrectionLevel },
-            cornersSquareOptions: { type: 'extra-rounded', color: '#000000' },
-            cornersDotOptions: { type: 'dot', color: '#000000' },
+        // Render QR code to a string
+        const qrHtmlString = renderToStaticMarkup(
+            <QrCodeForImageGeneration value={delegate.DelegateNo} />
+        );
+        container.innerHTML = qrHtmlString;
+        const node = container.firstChild as HTMLElement;
+
+        if (!node) continue;
+
+        // Convert the rendered HTML to a PNG image
+        const dataUrl = await toPng(node, { 
+            cacheBust: true,
+            pixelRatio: 2, // Higher resolution
         });
+        const blob = await (await fetch(dataUrl)).blob();
 
-        const blob = await qrCode.getRawData("png");
-        if (!blob) {
-            console.warn(`Skipping delegate ${delegate.DelegateNo} due to QR generation failure.`);
-            continue;
-        }
-
-        const fileName = `qr${i + 2}.png`;
+        const fileName = `${delegate.Name.replace(/ /g, '_')}_${delegate.DelegateNo}.png`;
         zip.file(fileName, blob);
         
         setDownloadProgress(`(${i + 1}/${delegatesWithQr.length})`);
-        await new Promise(resolve => setTimeout(resolve, 10));
+        await new Promise(resolve => setTimeout(resolve, 10)); // Small delay
       }
 
       const content = await zip.generateAsync({ type: "blob" });
@@ -110,6 +129,7 @@ export default function VerifyPage() {
             description: error.message || "An error occurred.",
         });
     } finally {
+        document.body.removeChild(container);
         setIsDownloading(false);
         setDownloadProgress(null);
     }
@@ -158,4 +178,3 @@ export default function VerifyPage() {
     </main>
   );
 }
-
