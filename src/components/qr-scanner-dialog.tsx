@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Html5Qrcode, type Html5QrcodeError, type Html5QrcodeResult } from "html5-qrcode";
+import jsQR from "jsqr";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,140 +22,138 @@ interface QrScannerDialogProps {
   onScanSuccess: (decodedText: string) => void;
 }
 
-type ScannerState = "IDLE" | "INITIALIZING" | "REQUESTING_PERMISSION" | "SCANNING" | "ERROR";
-
 export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScannerDialogProps) {
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const readerRef = useRef<HTMLDivElement>(null);
-  const [scannerState, setScannerState] = useState<ScannerState>("IDLE");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const requestRef = useRef<number>();
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  const stopScanner = useCallback(async () => {
-    if (scannerRef.current && scannerRef.current.isScanning) {
-      try {
-        await scannerRef.current.stop();
-        console.log("QR scanner stopped successfully.");
-      } catch (err) {
-        console.error("Error stopping the QR scanner: ", err);
-      }
+  const cleanup = useCallback(() => {
+    if (requestRef.current) {
+      cancelAnimationFrame(requestRef.current);
     }
-    // Fully clear the instance
-    scannerRef.current = null;
-    setScannerState("IDLE");
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
   }, []);
-  
+
   useEffect(() => {
     if (!open) {
-      stopScanner();
+      cleanup();
+      setHasPermission(null);
+      setIsLoading(true);
       return;
     }
 
-    if (open && readerRef.current && scannerState === 'IDLE') {
-        const startScanner = async (element: HTMLElement) => {
-            setScannerState("INITIALIZING");
+    const startCamera = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error("getUserMedia is not supported by this browser.");
+        }
 
-            // Ensure no old instance is lingering
-            if (scannerRef.current) {
-                await stopScanner();
-            }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
 
-            const html5QrCode = new Html5Qrcode(element.id);
-            scannerRef.current = html5QrCode;
+        streamRef.current = stream;
+        setHasPermission(true);
+        setIsLoading(false);
 
-            try {
-                setScannerState("REQUESTING_PERMISSION");
-                const cameras = await Html5Qrcode.getCameras();
-                if (!cameras || cameras.length === 0) {
-                    throw new Error("No cameras found on this device.");
-                }
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => {
+             // Use `play()` promise to ensure video is playing before we scan
+            videoRef.current?.play().then(() => {
+                requestRef.current = requestAnimationFrame(tick);
+            }).catch(e => {
+                console.error("Video play failed:", e);
+                setHasPermission(false);
+            });
+          };
+        }
+      } catch (err: any) {
+        console.error("Error accessing camera:", err);
+        setHasPermission(false);
+        setIsLoading(false);
+        toast({
+          variant: "destructive",
+          title: "Camera Access Denied",
+          description: "Please enable camera permissions in your browser settings.",
+        });
+      }
+    };
 
-                const onScanSuccessCallback = (decodedText: string, result: Html5QrcodeResult) => {
-                    onScanSuccess(decodedText);
-                    onOpenChange(false);
-                };
+    startCamera();
 
-                const onScanFailureCallback = (error: Html5QrcodeError) => {
-                    // This callback is called frequently, it's normal. 
-                    // We don't need to do anything here unless debugging.
-                };
+    return () => {
+      cleanup();
+    };
+  }, [open, toast, cleanup]);
 
-                await html5QrCode.start(
-                    { facingMode: "environment" },
-                    {
-                        fps: 10,
-                        qrbox: (viewfinderWidth, viewfinderHeight) => {
-                            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                            const qrboxSize = Math.floor(minEdge * 0.8);
-                            return { width: qrboxSize, height: qrboxSize };
-                        },
-                        aspectRatio: 1.0,
-                    },
-                    onScanSuccessCallback,
-                    onScanFailureCallback,
-                );
+  const tick = () => {
+    if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+      if (canvasRef.current && videoRef.current) {
+        const canvas = canvasRef.current;
+        const video = videoRef.current;
+        const ctx = canvas.getContext("2d");
 
-                setScannerState("SCANNING");
+        if (ctx) {
+          canvas.height = video.videoHeight;
+          canvas.width = video.videoWidth;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert",
+          });
 
-            } catch (err: any) {
-                console.error("Failed to start QR scanner:", err);
-                setScannerState("ERROR");
-                toast({
-                    variant: "destructive",
-                    title: "Camera Error",
-                    description: err.message || "Could not access the camera. Please check your browser permissions and refresh the page.",
-                });
-                onOpenChange(false);
-            }
-        };
-
-        // Delay slightly to allow dialog animation to complete
-        const timer = setTimeout(() => {
-            if (readerRef.current) {
-                startScanner(readerRef.current);
-            }
-        }, 100);
-
-        return () => clearTimeout(timer);
+          if (code) {
+            onScanSuccess(code.data);
+            onOpenChange(false);
+            return; // Stop scanning
+          }
+        }
+      }
     }
-    
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, scannerState]); // Depend on scannerState to re-trigger if needed
+    requestRef.current = requestAnimationFrame(tick);
+  };
 
   const handleClose = () => {
     onOpenChange(false);
   };
-  
-  const renderScannerContent = () => {
-    switch (scannerState) {
-        case "INITIALIZING":
-        case "REQUESTING_PERMISSION":
-            return (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
-                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                    <p className="mt-4 text-muted-foreground">
-                        {scannerState === "INITIALIZING" ? "Preparing Scanner..." : "Requesting Camera Access..."}
-                    </p>
-                </div>
-            );
-        case "ERROR":
-             return (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                    <Alert variant="destructive" className="m-4 text-center">
-                    <CameraOff className="h-8 w-8 mx-auto mb-2" />
-                    <AlertTitle>Camera Access Problem</AlertTitle>
-                    <AlertDescription>
-                       An error occurred while accessing the camera. Please ensure permissions are granted and try again.
-                    </AlertDescription>
-                    </Alert>
-                </div>
-            );
-        case "SCANNING":
-        case "IDLE": 
-        default:
-            // This container MUST exist in the DOM for Html5Qrcode to mount the video element.
-            return <div id="qr-reader-container" ref={readerRef} className="w-full h-full" />;
+
+  const renderContent = () => {
+    if (isLoading) {
+      return (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+          <p className="mt-4 text-muted-foreground">Requesting Camera Access...</p>
+        </div>
+      );
     }
-  }
+    if (hasPermission === false) {
+      return (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+          <Alert variant="destructive" className="m-4 text-center">
+            <CameraOff className="h-8 w-8 mx-auto mb-2" />
+            <AlertTitle>Camera Access Required</AlertTitle>
+            <AlertDescription>
+              Camera access was denied or an error occurred. Please enable it in your browser's site settings to use the scanner.
+            </AlertDescription>
+          </Alert>
+        </div>
+      );
+    }
+    return (
+        <>
+            <video ref={videoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
+            <canvas ref={canvasRef} style={{ display: 'none' }} />
+        </>
+    );
+  };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -167,7 +165,7 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
           </DialogDescription>
         </DialogHeader>
         <div className="relative w-full aspect-square rounded-lg overflow-hidden border bg-muted self-center">
-            {renderScannerContent()}
+          {renderContent()}
         </div>
         <DialogFooter>
           <Button variant="outline" className="w-full" onClick={handleClose}>
