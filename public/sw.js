@@ -1,4 +1,4 @@
-const CACHE_NAME = 'apsmun-delegate-cache-v1';
+const CACHE_NAME = 'apsmun-delegate-cache-v2';
 const urlsToCache = [
   '/',
   '/delegates.xlsx',
