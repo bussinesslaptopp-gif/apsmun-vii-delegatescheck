@@ -22,12 +22,11 @@ interface QrScannerDialogProps {
   onScanSuccess: (decodedText: string) => void;
 }
 
-const qrReaderId = "qr-reader-container";
-
-type ScannerState = "IDLE" | "INITIALIZING" | "SCANNING" | "ERROR";
+type ScannerState = "IDLE" | "INITIALIZING" | "REQUESTING_PERMISSION" | "SCANNING" | "ERROR";
 
 export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScannerDialogProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const readerRef = useRef<HTMLDivElement>(null);
   const [scannerState, setScannerState] = useState<ScannerState>("IDLE");
   const { toast } = useToast();
 
@@ -38,84 +37,80 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         console.log("QR scanner stopped successfully.");
       } catch (err) {
         console.error("Error stopping the QR scanner: ", err);
+      } finally {
+        scannerRef.current = null;
       }
     }
+     setScannerState("IDLE");
   }, []);
-  
-  useEffect(() => {
-    let isCancelled = false;
 
-    const startScanner = async () => {
-        if (isCancelled || !document.getElementById(qrReaderId)) return;
-        
-        setScannerState("INITIALIZING");
-        
-        const html5QrCode = new Html5Qrcode(qrReaderId);
-        scannerRef.current = html5QrCode;
+  const startScanner = useCallback(async (readerElement: HTMLDivElement) => {
+    setScannerState("INITIALIZING");
 
-        try {
-            const cameras = await Html5Qrcode.getCameras();
-            if (!cameras || cameras.length === 0) {
-                throw new Error("No cameras found on this device.");
-            }
-
-            if (isCancelled) return;
-
-            const onScanSuccessCallback = (decodedText: string, result: Html5QrcodeResult) => {
-                if (isCancelled) return;
-                onScanSuccess(decodedText);
-                onOpenChange(false);
-            };
-
-            const onScanFailureCallback = (error: Html5QrcodeError) => {
-                // This callback is called frequently, so we don't log every "error"
-                // unless it's a critical one. "QR code not found" is expected.
-            };
-
-            await html5QrCode.start(
-                { facingMode: "environment" },
-                {
-                    fps: 10,
-                    qrbox: (viewfinderWidth, viewfinderHeight) => {
-                        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                        const qrboxSize = Math.floor(minEdge * 0.8);
-                        return { width: qrboxSize, height: qrboxSize };
-                    },
-                    aspectRatio: 1.0,
-                },
-                onScanSuccessCallback,
-                onScanFailureCallback,
-            );
-
-            if (!isCancelled) {
-              setScannerState("SCANNING");
-            }
-
-        } catch (err: any) {
-            if (isCancelled) return;
-            
-            console.error("Failed to start QR scanner:", err);
-            setScannerState("ERROR");
-            toast({
-                variant: "destructive",
-                title: "Camera Error",
-                description: err.message || "Could not access the camera. Please check your browser permissions.",
-            });
-        }
-    };
-    
-    if (open) {
-      // Use a timeout to allow the dialog animation to complete
-      const timeoutId = setTimeout(startScanner, 150);
-      return () => {
-        isCancelled = true;
-        clearTimeout(timeoutId);
-        stopScanner();
-      };
-    } else {
-      stopScanner();
-      setScannerState("IDLE");
+    if (scannerRef.current) {
+        await stopScanner();
     }
+    
+    const html5QrCode = new Html5Qrcode(readerElement.id);
+    scannerRef.current = html5QrCode;
+
+    try {
+        setScannerState("REQUESTING_PERMISSION");
+        const cameras = await Html5Qrcode.getCameras();
+        if (!cameras || cameras.length === 0) {
+            throw new Error("No cameras found on this device.");
+        }
+
+        const onScanSuccessCallback = (decodedText: string, result: Html5QrcodeResult) => {
+            onScanSuccess(decodedText);
+            onOpenChange(false); // This will trigger stopScanner via useEffect
+        };
+
+        const onScanFailureCallback = (error: Html5QrcodeError) => {
+            // This is called frequently, only log critical errors if needed
+        };
+        
+        await html5QrCode.start(
+            { facingMode: "environment" },
+            {
+                fps: 10,
+                qrbox: (viewfinderWidth, viewfinderHeight) => {
+                    const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                    const qrboxSize = Math.floor(minEdge * 0.8);
+                    return { width: qrboxSize, height: qrboxSize };
+                },
+                aspectRatio: 1.0,
+            },
+            onScanSuccessCallback,
+            onScanFailureCallback,
+        );
+
+        setScannerState("SCANNING");
+
+    } catch (err: any) {
+        console.error("Failed to start QR scanner:", err);
+        setScannerState("ERROR");
+        toast({
+            variant: "destructive",
+            title: "Camera Error",
+            description: err.message || "Could not access the camera. Please check your browser permissions.",
+        });
+        onOpenChange(false);
+    }
+  }, [onOpenChange, onScanSuccess, stopScanner, toast]);
+
+  useEffect(() => {
+    if (open && readerRef.current) {
+      // We have the element, let's start the scanner
+      startScanner(readerRef.current);
+    } else {
+      // Dialog is closed or element is not ready, ensure scanner is stopped
+      stopScanner();
+    }
+
+    return () => {
+      stopScanner();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -126,29 +121,32 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
   const renderScannerContent = () => {
     switch (scannerState) {
         case "INITIALIZING":
+        case "REQUESTING_PERMISSION":
             return (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
                     <Loader2 className="h-10 w-10 animate-spin text-primary" />
-                    <p className="mt-4 text-muted-foreground">Starting Camera...</p>
+                    <p className="mt-4 text-muted-foreground">
+                        {scannerState === "INITIALIZING" ? "Preparing Scanner..." : "Requesting Camera Access..."}
+                    </p>
                 </div>
             );
         case "ERROR":
-            return (
+             return (
                 <div className="absolute inset-0 flex items-center justify-center bg-black/80">
                     <Alert variant="destructive" className="m-4 text-center">
                     <CameraOff className="h-8 w-8 mx-auto mb-2" />
-                    <AlertTitle>Camera Access Required</AlertTitle>
+                    <AlertTitle>Camera Access Problem</AlertTitle>
                     <AlertDescription>
-                        Camera access was denied or an error occurred. Please enable it in your browser's site settings to use the scanner.
+                       An error occurred while accessing the camera. Please ensure permissions are granted and try again.
                     </AlertDescription>
                     </Alert>
                 </div>
             );
         case "SCANNING":
-        case "IDLE": // IDLE is the initial state before initializing
+        case "IDLE": 
         default:
             // The container needs to exist in the DOM for the scanner to hook into it.
-            return <div id={qrReaderId} className="w-full h-full" />;
+            return <div id="qr-reader-container" ref={readerRef} className="w-full h-full" />;
     }
   }
 
