@@ -27,11 +27,12 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const requestRef = useRef<number>();
+  
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  const cleanup = useCallback(() => {
+  const stopStream = useCallback(() => {
     if (requestRef.current) {
       cancelAnimationFrame(requestRef.current);
     }
@@ -39,60 +40,65 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+     if (videoRef.current) {
+        videoRef.current.srcObject = null;
+    }
   }, []);
 
   useEffect(() => {
-    if (!open) {
-      cleanup();
-      setHasPermission(null);
-      setIsLoading(true);
-      return;
-    }
-
     const startCamera = async () => {
+      if (!open) return;
+
+      setIsLoading(true);
+      setHasPermission(null);
+
       try {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error("getUserMedia is not supported by this browser.");
+          throw new Error("Camera access is not supported by this browser.");
         }
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment" },
-        });
-
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
         streamRef.current = stream;
-        setHasPermission(true);
-        setIsLoading(false);
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
-             // Use `play()` promise to ensure video is playing before we scan
-            videoRef.current?.play().then(() => {
-                requestRef.current = requestAnimationFrame(tick);
-            }).catch(e => {
-                console.error("Video play failed:", e);
-                setHasPermission(false);
-            });
-          };
+          await videoRef.current.play();
+          setHasPermission(true);
+          setIsLoading(false);
+          requestRef.current = requestAnimationFrame(tick);
+        } else {
+            throw new Error("Video element not found.");
         }
       } catch (err: any) {
-        console.error("Error accessing camera:", err);
+        console.error("[QR Scanner] Camera Error:", err);
         setHasPermission(false);
         setIsLoading(false);
-        toast({
-          variant: "destructive",
-          title: "Camera Access Denied",
-          description: "Please enable camera permissions in your browser settings.",
-        });
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+          toast({
+            variant: "destructive",
+            title: "Camera Access Denied",
+            description: "Please enable camera permissions in your browser settings.",
+          });
+        } else {
+          toast({
+            variant: "destructive",
+            title: "Camera Error",
+            description: err.message || "Could not start the camera.",
+          });
+        }
       }
     };
 
-    startCamera();
+    if (open) {
+      startCamera();
+    } else {
+      stopStream();
+    }
 
     return () => {
-      cleanup();
+      stopStream();
     };
-  }, [open, toast, cleanup]);
+  }, [open, toast, stopStream]);
 
   const tick = () => {
     if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
@@ -121,19 +127,17 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
     requestRef.current = requestAnimationFrame(tick);
   };
 
-  const handleClose = () => {
-    onOpenChange(false);
-  };
 
   const renderContent = () => {
     if (isLoading) {
-      return (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
-          <Loader2 className="h-10 w-10 animate-spin text-primary" />
-          <p className="mt-4 text-muted-foreground">Requesting Camera Access...</p>
-        </div>
-      );
+        return (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
+                <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                <p className="mt-4 text-muted-foreground">Starting Camera...</p>
+            </div>
+        );
     }
+
     if (hasPermission === false) {
       return (
         <div className="absolute inset-0 flex items-center justify-center bg-black/80">
@@ -147,16 +151,13 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         </div>
       );
     }
-    return (
-        <>
-            <video ref={videoRef} className="h-full w-full object-cover" autoPlay playsInline muted />
-            <canvas ref={canvasRef} style={{ display: 'none' }} />
-        </>
-    );
+    
+    // Video element is always in the DOM but hidden until permission is granted and loading is false.
+    return null;
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px] md:max-w-md">
         <DialogHeader>
           <DialogTitle>Scan Delegate QR Code</DialogTitle>
@@ -165,10 +166,18 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
           </DialogDescription>
         </DialogHeader>
         <div className="relative w-full aspect-square rounded-lg overflow-hidden border bg-muted self-center">
+          <video
+            ref={videoRef}
+            className={`h-full w-full object-cover transition-opacity duration-300 ${!isLoading && hasPermission ? 'opacity-100' : 'opacity-0'}`}
+            autoPlay
+            playsInline
+            muted
+          />
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
           {renderContent()}
         </div>
         <DialogFooter>
-          <Button variant="outline" className="w-full" onClick={handleClose}>
+          <Button variant="outline" className="w-full" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
         </DialogFooter>
