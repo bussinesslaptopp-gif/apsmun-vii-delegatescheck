@@ -38,41 +38,22 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         console.log("QR scanner stopped successfully.");
       } catch (err) {
         console.error("Error stopping the QR scanner: ", err);
-      } finally {
-        scannerRef.current = null;
       }
     }
   }, []);
   
   useEffect(() => {
-    // Only run when the dialog opens
-    if (!open) {
-      // Cleanup on close
-      stopScanner();
-      setScannerState("IDLE");
-      return;
-    }
-
     let isCancelled = false;
 
     const startScanner = async () => {
-        if (isCancelled || scannerState !== "IDLE") return;
+        if (isCancelled || !document.getElementById(qrReaderId)) return;
         
         setScannerState("INITIALIZING");
         
-        // Ensure the container element exists before trying to use it
-        const container = document.getElementById(qrReaderId);
-        if (!container) {
-            console.error("QR scanner container element not found in DOM.");
-            setScannerState("ERROR");
-            return;
-        }
-
         const html5QrCode = new Html5Qrcode(qrReaderId);
         scannerRef.current = html5QrCode;
 
         try {
-            // Check for cameras first to provide a better UX.
             const cameras = await Html5Qrcode.getCameras();
             if (!cameras || cameras.length === 0) {
                 throw new Error("No cameras found on this device.");
@@ -123,14 +104,18 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         }
     };
     
-    // Use a small timeout to allow the dialog animation to complete before accessing the DOM
-    const timeoutId = setTimeout(startScanner, 150);
-
-    return () => {
+    if (open) {
+      // Use a timeout to allow the dialog animation to complete
+      const timeoutId = setTimeout(startScanner, 150);
+      return () => {
         isCancelled = true;
         clearTimeout(timeoutId);
         stopScanner();
-    };
+      };
+    } else {
+      stopScanner();
+      setScannerState("IDLE");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -162,6 +147,7 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         case "SCANNING":
         case "IDLE": // IDLE is the initial state before initializing
         default:
+            // The container needs to exist in the DOM for the scanner to hook into it.
             return <div id={qrReaderId} className="w-full h-full" />;
     }
   }
