@@ -37,82 +37,89 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         console.log("QR scanner stopped successfully.");
       } catch (err) {
         console.error("Error stopping the QR scanner: ", err);
-      } finally {
-        scannerRef.current = null;
       }
     }
-     setScannerState("IDLE");
+    // Fully clear the instance
+    scannerRef.current = null;
+    setScannerState("IDLE");
   }, []);
+  
+  useEffect(() => {
+    if (!open) {
+      stopScanner();
+      return;
+    }
 
-  const startScanner = useCallback(async (readerElement: HTMLDivElement) => {
-    setScannerState("INITIALIZING");
+    if (open && readerRef.current && scannerState === 'IDLE') {
+        const startScanner = async (element: HTMLElement) => {
+            setScannerState("INITIALIZING");
 
-    if (scannerRef.current) {
-        await stopScanner();
+            // Ensure no old instance is lingering
+            if (scannerRef.current) {
+                await stopScanner();
+            }
+
+            const html5QrCode = new Html5Qrcode(element.id);
+            scannerRef.current = html5QrCode;
+
+            try {
+                setScannerState("REQUESTING_PERMISSION");
+                const cameras = await Html5Qrcode.getCameras();
+                if (!cameras || cameras.length === 0) {
+                    throw new Error("No cameras found on this device.");
+                }
+
+                const onScanSuccessCallback = (decodedText: string, result: Html5QrcodeResult) => {
+                    onScanSuccess(decodedText);
+                    onOpenChange(false);
+                };
+
+                const onScanFailureCallback = (error: Html5QrcodeError) => {
+                    // This callback is called frequently, it's normal. 
+                    // We don't need to do anything here unless debugging.
+                };
+
+                await html5QrCode.start(
+                    { facingMode: "environment" },
+                    {
+                        fps: 10,
+                        qrbox: (viewfinderWidth, viewfinderHeight) => {
+                            const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                            const qrboxSize = Math.floor(minEdge * 0.8);
+                            return { width: qrboxSize, height: qrboxSize };
+                        },
+                        aspectRatio: 1.0,
+                    },
+                    onScanSuccessCallback,
+                    onScanFailureCallback,
+                );
+
+                setScannerState("SCANNING");
+
+            } catch (err: any) {
+                console.error("Failed to start QR scanner:", err);
+                setScannerState("ERROR");
+                toast({
+                    variant: "destructive",
+                    title: "Camera Error",
+                    description: err.message || "Could not access the camera. Please check your browser permissions and refresh the page.",
+                });
+                onOpenChange(false);
+            }
+        };
+
+        // Delay slightly to allow dialog animation to complete
+        const timer = setTimeout(() => {
+            if (readerRef.current) {
+                startScanner(readerRef.current);
+            }
+        }, 100);
+
+        return () => clearTimeout(timer);
     }
     
-    const html5QrCode = new Html5Qrcode(readerElement.id);
-    scannerRef.current = html5QrCode;
-
-    try {
-        setScannerState("REQUESTING_PERMISSION");
-        const cameras = await Html5Qrcode.getCameras();
-        if (!cameras || cameras.length === 0) {
-            throw new Error("No cameras found on this device.");
-        }
-
-        const onScanSuccessCallback = (decodedText: string, result: Html5QrcodeResult) => {
-            onScanSuccess(decodedText);
-            onOpenChange(false); // This will trigger stopScanner via useEffect
-        };
-
-        const onScanFailureCallback = (error: Html5QrcodeError) => {
-            // This is called frequently, only log critical errors if needed
-        };
-        
-        await html5QrCode.start(
-            { facingMode: "environment" },
-            {
-                fps: 10,
-                qrbox: (viewfinderWidth, viewfinderHeight) => {
-                    const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
-                    const qrboxSize = Math.floor(minEdge * 0.8);
-                    return { width: qrboxSize, height: qrboxSize };
-                },
-                aspectRatio: 1.0,
-            },
-            onScanSuccessCallback,
-            onScanFailureCallback,
-        );
-
-        setScannerState("SCANNING");
-
-    } catch (err: any) {
-        console.error("Failed to start QR scanner:", err);
-        setScannerState("ERROR");
-        toast({
-            variant: "destructive",
-            title: "Camera Error",
-            description: err.message || "Could not access the camera. Please check your browser permissions.",
-        });
-        onOpenChange(false);
-    }
-  }, [onOpenChange, onScanSuccess, stopScanner, toast]);
-
-  useEffect(() => {
-    if (open && readerRef.current) {
-      // We have the element, let's start the scanner
-      startScanner(readerRef.current);
-    } else {
-      // Dialog is closed or element is not ready, ensure scanner is stopped
-      stopScanner();
-    }
-
-    return () => {
-      stopScanner();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, scannerState]); // Depend on scannerState to re-trigger if needed
 
   const handleClose = () => {
     onOpenChange(false);
@@ -145,7 +152,7 @@ export function QrScannerDialog({ open, onOpenChange, onScanSuccess }: QrScanner
         case "SCANNING":
         case "IDLE": 
         default:
-            // The container needs to exist in the DOM for the scanner to hook into it.
+            // This container MUST exist in the DOM for Html5Qrcode to mount the video element.
             return <div id="qr-reader-container" ref={readerRef} className="w-full h-full" />;
     }
   }
