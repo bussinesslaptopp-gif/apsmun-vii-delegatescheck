@@ -11,7 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { Delegate } from '@/lib/types';
 import { QrCodeDisplay } from '@/components/qr-code-display';
 import { logoUrl } from '@/components/app-header';
-import { getQrCodeAsBlob } from '@/components/custom-qr-code';
+import { getQrCodeAsPngBlob } from '@/components/custom-qr-code';
 
 
 export default function VerifyPage() {
@@ -57,7 +57,7 @@ export default function VerifyPage() {
       for (let i = 0; i < delegatesWithQr.length; i++) {
         const delegate = delegatesWithQr[i];
         
-        const blob = await getQrCodeAsBlob(delegate.DelegateNo, logoUrl);
+        const blob = await getQrCodeAsPngBlob(delegate.DelegateNo, logoUrl);
 
         if (blob) {
             const fileName = `${delegate.Name.replace(/ /g, '_')}_${delegate.DelegateNo}.png`;
