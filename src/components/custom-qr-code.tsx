@@ -61,17 +61,20 @@ export function CustomQrCode({ value, logoUrl }: CustomQrCodeProps) {
     return <div ref={ref} />;
 }
 
-export const getQrCodeAsBlob = async (value: string, logoUrl: string): Promise<Blob | null> => {
+export const getQrCodeAsPngBlob = async (value: string, logoUrl: string): Promise<Blob | null> => {
     const qr = new QRCodeStyling({
         ...qrOptions,
         width: 256,
         height: 256,
+        type: 'canvas', // Use canvas for raw data generation
         data: value,
         image: logoUrl,
     });
     
     try {
-        const blob = await qr.getRawData('png');
+        const dataUrl = await qr.getRawData('png') as string;
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
         return blob;
     } catch (error) {
         console.error("Failed to generate QR code blob:", error);
