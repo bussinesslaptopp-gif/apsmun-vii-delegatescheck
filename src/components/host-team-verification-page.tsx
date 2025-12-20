@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
-import { Search, QrCode, FileWarning, Frown, Loader2, Download, CheckCircle } from 'lucide-react';
+import { Search, QrCode, FileWarning, Frown, Loader2, CheckCircle } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { QrScannerDialog } from '@/components/qr-scanner-dialog';
 import type { HostMember } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { HostMemberCard } from './host-member-card';
+import { ECMemberCard } from './ec-member-card';
 
 interface HostTeamVerificationPageProps {
   department: 'DC' | 'EC';
@@ -51,57 +52,45 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
       setDataLoaded(false);
       setLoadingError(null);
       const cacheKey = `host-team-${department}`;
+      const fileName = `${department.toLowerCase()}.xlsx`;
 
       const parseAndSetData = (jsonData: any[], source: 'cache' | 'network') => {
-        
-        const allMembers: HostMember[] = jsonData.map(row => ({
+        if (jsonData.length === 0) {
+          throw new Error('Excel file is empty.');
+        }
+
+        const firstRow = jsonData[0];
+        if (!('ID' in firstRow && 'Name' in firstRow && 'Department' in firstRow)) {
+          throw new Error("Invalid Excel format. It must contain 'ID', 'Name', and 'Department' columns.");
+        }
+
+        const formattedData: HostMember[] = jsonData.map(row => ({
             ID: String(row.ID || ''),
             Name: String(row.Name || ''),
             Department: String(row.Department || ''),
         }));
 
-        if (allMembers.length === 0) {
-          throw new Error('Excel file is empty or invalid.');
-        }
-        
-        const firstRow = allMembers[0];
-        if (!('ID' in firstRow && 'Name' in firstRow && 'Department' in firstRow)) {
-          throw new Error("Invalid Excel format. It must contain 'ID', 'Name', and 'Department' columns.");
-        }
-        
-        const departmentMembers = allMembers.filter(
-          (member) => member.Department && member.Department.trim().toUpperCase() === department
-        );
-
-        setMembers(departmentMembers);
+        setMembers(formattedData);
         setDataLoaded(true);
 
         if (source === 'network') {
-          localStorage.setItem(cacheKey, JSON.stringify(departmentMembers));
-          if (departmentMembers.length > 0) {
-            toast({
-                title: 'Data Loaded Successfully',
-                description: `${departmentMembers.length} members loaded for ${department} from the server.`,
-            });
-          } else {
-             toast({
-                variant: 'destructive',
-                title: `No ${department} Members Found`,
-                description: `The data file was loaded, but no members were found for the ${department} department.`,
-            });
-          }
+          localStorage.setItem(cacheKey, JSON.stringify(formattedData));
+          toast({
+              title: 'Data Loaded Successfully',
+              description: `${formattedData.length} members loaded for ${department} from the server.`,
+          });
         } else {
             toast({
                 title: 'Loaded from Cache',
-                description: `${departmentMembers.length} members for ${department} loaded. You are offline.`,
+                description: `${formattedData.length} members for ${department} loaded. You are offline.`,
             });
         }
       };
 
       try {
         if (navigator.onLine) {
-          const response = await fetch(`/host-team.xlsx?_=${new Date().getTime()}`);
-          if (!response.ok) throw new Error(`Could not load host team data file. Status: ${response.status}`);
+          const response = await fetch(`/${fileName}?_=${new Date().getTime()}`);
+          if (!response.ok) throw new Error(`Could not load ${fileName}. Status: ${response.status}`);
 
           const arrayBuffer = await response.arrayBuffer();
           const workbook = XLSX.read(arrayBuffer, { type: 'buffer' });
@@ -125,7 +114,7 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
             setDataLoaded(true);
           }
         } else {
-          setLoadingError(networkError.message === 'Offline mode' ? `You are offline and no data is cached for ${department}.` : networkError.message || `Failed to load data for ${department}. Please check connection.`);
+          setLoadingError(networkError.message === 'Offline mode' ? `You are offline and no data is cached for ${department}.` : `Failed to load data for ${department}. Please check your connection.`);
           setDataLoaded(true);
         }
       }
@@ -220,6 +209,9 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
   };
   
   const mainButtonDisabled = !dataLoaded || !!loadingError || !isOnline || members.length === 0;
+  
+  const MemberCardComponent = department === 'EC' ? ECMemberCard : HostMemberCard;
+
 
   const renderContent = () => {
     if (!dataLoaded) {
@@ -245,7 +237,7 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
            <CardContent>
                  <div className="mt-4 text-xs text-muted-foreground p-3 bg-muted/50 rounded-lg flex items-start space-x-2">
                     <FileWarning className="h-6 w-6 mt-1 flex-shrink-0"/>
-                    <span>Please ensure a valid `host-team.xlsx` file is present in the `public` directory. It must contain 'ID', 'Name', and 'Department' columns.</span>
+                    <span>Please ensure a valid `{department.toLowerCase()}.xlsx` file is present in the `public` directory. It must contain 'ID', 'Name', and 'Department' columns.</span>
                 </div>
             </CardContent>
         </Card>
@@ -286,7 +278,7 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
         <div className="relative min-h-[300px]">
           {foundMember && (
             <div className="flex flex-col items-center">
-              <HostMemberCard member={foundMember} />
+              <MemberCardComponent member={foundMember} />
               <Button variant="link" onClick={resetSearch} className="mt-4">
                 Clear Search
               </Button>
@@ -300,7 +292,7 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
               </h2>
               <div className="grid grid-cols-1 gap-4">
                 {searchResults.slice(0, 10).map((member) => (
-                  <HostMemberCard key={member.ID} member={member} />
+                  <MemberCardComponent key={member.ID} member={member} />
                 ))}
               </div>
               {searchResults.length > 10 && <p className="text-center text-muted-foreground">More than 10 results, please refine your search.</p>}
@@ -349,5 +341,3 @@ export function HostTeamVerificationPage({ department }: HostTeamVerificationPag
     </>
   );
 }
-
-    
