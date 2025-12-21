@@ -1,4 +1,5 @@
-const CACHE_NAME = 'apsmun-vii-cache-v1';
+
+const CACHE_NAME = 'apsmun-v1';
 const urlsToCache = [
   '/',
   '/host-team/dc',
@@ -6,11 +7,12 @@ const urlsToCache = [
   '/host-team/socials',
   '/verify-zip',
   '/manifest.json',
-  '/icon-192x192.png',
-  '/icon-512x512.png',
   '/delegates.xlsx',
   '/dc.xlsx',
   '/ec.xlsx',
+  '/icon-192x192.png',
+  '/icon-512x512.png',
+  'https://bgs45urr71.ufs.sh/f/5pQTmJ38MJ42myy5VjKZqoiBjE6uNhldJH4fy3szSZkcQAgt'
 ];
 
 self.addEventListener('install', event => {
@@ -18,48 +20,61 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Opened cache');
-        // Add all essential assets to the cache
-        return cache.addAll(urlsToCache.map(url => new Request(url, { cache: 'reload' })));
+        // Use addAll for atomic operation
+        return cache.addAll(urlsToCache).catch(error => {
+            console.error('Failed to cache initial assets:', error);
+            // Even if some assets fail, the service worker will still install.
+            // This is better than failing the install completely.
+        });
       })
   );
 });
 
 self.addEventListener('fetch', event => {
-  const requestUrl = new URL(event.request.url);
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => {
+        // Cache hit - return response
+        if (response) {
+          return response;
+        }
 
-  // For app pages and assets, use a cache-first strategy
-  if (requestUrl.origin === location.origin) {
-    event.respondWith(
-      caches.match(event.request)
-        .then(response => {
-          // Cache hit - return response
-          if (response) {
+        // IMPORTANT: Clone the request. A request is a stream and
+        // can only be consumed once. Since we are consuming this
+        // once by cache and once by the browser for fetch, we need
+        // to clone the response.
+        const fetchRequest = event.request.clone();
+
+        return fetch(fetchRequest).then(
+          response => {
+            // Check if we received a valid response
+            if(!response || response.status !== 200 || response.type !== 'basic') {
+              if (response && response.type === 'opaque') {
+                // Opaque responses are for cross-origin requests. We can't inspect them,
+                // but we can still cache them. This is important for things like Google Fonts.
+                const responseToCache = response.clone();
+                 caches.open(CACHE_NAME)
+                  .then(cache => {
+                    cache.put(event.request, responseToCache);
+                  });
+                return response;
+              }
+              return response;
+            }
+
+            const responseToCache = response.clone();
+
+            caches.open(CACHE_NAME)
+              .then(cache => {
+                cache.put(event.request, responseToCache);
+              });
+
             return response;
           }
-          // Not in cache, fetch from network
-          return fetch(event.request).then(
-            networkResponse => {
-              // Check if we received a valid response
-              if(!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-                return networkResponse;
-              }
-
-              // Clone the response because it's a stream and can only be consumed once
-              const responseToCache = networkResponse.clone();
-
-              caches.open(CACHE_NAME)
-                .then(cache => {
-                  cache.put(event.request, responseToCache);
-                });
-
-              return networkResponse;
-            }
-          );
-        })
+        );
+      })
     );
-  }
 });
-
 
 self.addEventListener('activate', event => {
   const cacheWhitelist = [CACHE_NAME];
