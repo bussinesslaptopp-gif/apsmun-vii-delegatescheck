@@ -1,36 +1,30 @@
-
-const CACHE_NAME = 'apsmun-v1';
+const CACHE_NAME = 'apsmun-delegate-cache-v2';
 const urlsToCache = [
   '/',
-  '/host-team/dc',
-  '/host-team/ec',
-  '/host-team/socials',
-  '/verify-zip',
-  '/manifest.json',
   '/delegates.xlsx',
   '/dc.xlsx',
   '/ec.xlsx',
-  '/icon-192x192.png',
-  '/icon-512x512.png',
-  'https://bgs45urr71.ufs.sh/f/5pQTmJ38MJ42myy5VjKZqoiBjE6uNhldJH4fy3szSZkcQAgt'
+  '/manifest.json'
 ];
 
 self.addEventListener('install', event => {
+  // Perform install steps
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('Opened cache');
-        // Use addAll for atomic operation
-        return cache.addAll(urlsToCache).catch(error => {
-            console.error('Failed to cache initial assets:', error);
-            // Even if some assets fail, the service worker will still install.
-            // This is better than failing the install completely.
-        });
+        // Cache the essential files for the app shell to work offline
+        return cache.addAll(urlsToCache);
       })
   );
 });
 
 self.addEventListener('fetch', event => {
+    // We only want to handle GET requests
+    if (event.request.method !== 'GET') {
+        return;
+    }
+
   event.respondWith(
     caches.match(event.request)
       .then(response => {
@@ -39,43 +33,44 @@ self.addEventListener('fetch', event => {
           return response;
         }
 
-        // IMPORTANT: Clone the request. A request is a stream and
-        // can only be consumed once. Since we are consuming this
-        // once by cache and once by the browser for fetch, we need
-        // to clone the response.
-        const fetchRequest = event.request.clone();
-
-        return fetch(fetchRequest).then(
-          response => {
+        // Not in cache - fetch from network
+        return fetch(event.request).then(
+          networkResponse => {
             // Check if we received a valid response
-            if(!response || response.status !== 200 || response.type !== 'basic') {
-              if (response && response.type === 'opaque') {
-                // Opaque responses are for cross-origin requests. We can't inspect them,
-                // but we can still cache them. This is important for things like Google Fonts.
-                const responseToCache = response.clone();
-                 caches.open(CACHE_NAME)
-                  .then(cache => {
-                    cache.put(event.request, responseToCache);
-                  });
-                return response;
-              }
-              return response;
+            if(!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+              return networkResponse;
             }
 
-            const responseToCache = response.clone();
+            // IMPORTANT: Clone the response. A response is a stream
+            // and because we want the browser to consume the response
+            // as well as the cache consuming the response, we need
+            // to clone it so we have two streams.
+            const responseToCache = networkResponse.clone();
 
             caches.open(CACHE_NAME)
               .then(cache => {
-                cache.put(event.request, responseToCache);
+                // We don't cache QR code downloads or anything that isn't a GET request
+                if (!event.request.url.includes('data:image')) {
+                    cache.put(event.request, responseToCache);
+                }
               });
 
-            return response;
+            return networkResponse;
           }
-        );
+        ).catch(err => {
+            // Network request failed, try to serve a fallback page if it's a navigation request
+            if (event.request.mode === 'navigate') {
+                return caches.match('/');
+            }
+            // For other requests like images, if they fail and aren't in cache, there's not much we can do.
+            // The browser will handle the error.
+            return;
+        });
       })
     );
 });
 
+// This helps activate the new service worker faster and cleans up old caches
 self.addEventListener('activate', event => {
   const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
@@ -83,10 +78,12 @@ self.addEventListener('activate', event => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheWhitelist.indexOf(cacheName) === -1) {
+            console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
     })
   );
+  return self.clients.claim();
 });
