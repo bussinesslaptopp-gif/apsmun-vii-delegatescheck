@@ -1,76 +1,66 @@
-const CACHE_NAME = 'apsmun-delegate-cache-v2';
+const CACHE_NAME = 'apsmun-universal-cache-v1';
 const urlsToCache = [
   '/',
+  '/manifest.json',
   '/delegates.xlsx',
   '/dc.xlsx',
   '/ec.xlsx',
-  '/manifest.json'
 ];
 
 self.addEventListener('install', event => {
-  // Perform install steps
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Opened cache');
-        // Cache the essential files for the app shell to work offline
+        console.log('Opened cache and caching essential assets');
         return cache.addAll(urlsToCache);
       })
   );
 });
 
 self.addEventListener('fetch', event => {
-    // We only want to handle GET requests
-    if (event.request.method !== 'GET') {
-        return;
-    }
+  // We only want to cache GET requests.
+  if (event.request.method !== 'GET') {
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request)
-      .then(response => {
+      .then(cachedResponse => {
         // Cache hit - return response
-        if (response) {
-          return response;
+        if (cachedResponse) {
+          // While we have a cached response, fetch a new one in the background
+          // to keep the cache fresh.
+          fetch(event.request).then(networkResponse => {
+             if (networkResponse && networkResponse.status === 200) {
+                caches.open(CACHE_NAME).then(cache => {
+                    cache.put(event.request, networkResponse);
+                });
+             }
+          });
+          return cachedResponse;
         }
 
-        // Not in cache - fetch from network
+        // Not in cache - fetch from network and cache it
         return fetch(event.request).then(
           networkResponse => {
-            // Check if we received a valid response
             if(!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
               return networkResponse;
             }
 
-            // IMPORTANT: Clone the response. A response is a stream
-            // and because we want the browser to consume the response
-            // as well as the cache consuming the response, we need
-            // to clone it so we have two streams.
             const responseToCache = networkResponse.clone();
-
             caches.open(CACHE_NAME)
               .then(cache => {
-                // We don't cache QR code downloads or anything that isn't a GET request
-                if (!event.request.url.includes('data:image')) {
-                    cache.put(event.request, responseToCache);
-                }
+                cache.put(event.request, responseToCache);
               });
 
             return networkResponse;
           }
-        ).catch(err => {
-            // Network request failed, try to serve a fallback page if it's a navigation request
-            if (event.request.mode === 'navigate') {
-                return caches.match('/');
-            }
-            // For other requests like images, if they fail and aren't in cache, there's not much we can do.
-            // The browser will handle the error.
-            return;
-        });
+        );
       })
     );
 });
 
-// This helps activate the new service worker faster and cleans up old caches
 self.addEventListener('activate', event => {
   const cacheWhitelist = [CACHE_NAME];
   event.waitUntil(
