@@ -1,23 +1,23 @@
-
 {
-    "name": "APS MUN VII - Verification",
-    "short_name": "APSMUN VII",
-    "description": "Delegate and host team verification app for APSMUN VII.",
-    "icons": [
-        {
-            "src": "/icon-192x192.png",
-            "sizes": "192x192",
-            "type": "image/png"
-        },
-        {
-            "src": "/icon-512x512.png",
-            "sizes": "512x512",
-            "type": "image/png"
-        }
-    ],
-    "theme_color": "#101828",
-    "background_color": "#101828",
-    "start_url": "/",
-    "display": "standalone",
-    "orientation": "portrait"
+  "name": "APS MUN VII - Verification",
+  "short_name": "APSMUN Verify",
+  "description": "Delegate and Host Team verification app for APS MUN VII.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101828",
+  "theme_color": "#14532d",
+  "icons": [
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
 }
