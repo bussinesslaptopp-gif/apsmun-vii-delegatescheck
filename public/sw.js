@@ -1,4 +1,3 @@
-
 const CACHE_NAME = 'apsmun-vii-cache-v1';
 const urlsToCache = [
   '/',
