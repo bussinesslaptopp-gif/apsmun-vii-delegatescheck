@@ -27,6 +27,7 @@ import { QrScannerDialog } from '@/components/qr-scanner-dialog';
 import { DelegateCard } from '@/components/delegate-card';
 import { HostMemberCard } from '@/components/host-member-card';
 import { ECMemberCard } from '@/components/ec-member-card';
+import { SpecialHostCard } from '@/components/special-host-card';
 import type { Delegate, HostMember, ECMember } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
@@ -340,7 +341,11 @@ export default function UniversalVerificationPage() {
       case 'delegate':
         return <DelegateCard delegate={item.data as Delegate} />;
       case 'dc':
-        return <HostMemberCard member={item.data as HostMember} />;
+        const member = item.data as HostMember;
+        if (member.ID === 'DC024' || member.ID === 'DC100') {
+          return <SpecialHostCard member={member} />;
+        }
+        return <HostMemberCard member={member} />;
       case 'ec':
         return <ECMemberCard member={item.data as ECMember} />;
       default:
@@ -519,3 +524,5 @@ export default function UniversalVerificationPage() {
     </>
   );
 }
+
+    
