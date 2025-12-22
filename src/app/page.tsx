@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
@@ -26,7 +27,7 @@ import { QrScannerDialog } from '@/components/qr-scanner-dialog';
 import { DelegateCard } from '@/components/delegate-card';
 import { HostMemberCard } from '@/components/host-member-card';
 import { ECMemberCard } from '@/components/ec-member-card';
-import type { Delegate, HostMember } from '@/lib/types';
+import type { Delegate, HostMember, ECMember } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 
 interface BeforeInstallPromptEvent extends Event {
@@ -41,12 +42,12 @@ interface BeforeInstallPromptEvent extends Event {
 type FoundItem =
   | { type: 'delegate'; data: Delegate }
   | { type: 'dc'; data: HostMember }
-  | { type: 'ec'; data: HostMember };
+  | { type: 'ec'; data: ECMember };
 
 export default function UniversalVerificationPage() {
   const [delegates, setDelegates] = useState<Delegate[]>([]);
   const [dcMembers, setDcMembers] = useState<HostMember[]>([]);
-  const [ecMembers, setEcMembers] = useState<HostMember[]>([]);
+  const [ecMembers, setEcMembers] = useState<ECMember[]>([]);
 
   const [dataLoaded, setDataLoaded] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -149,8 +150,8 @@ export default function UniversalVerificationPage() {
             DelegateNo: String(row.DelegateNo),
             Name: String(row.Name),
             Committee: String(row.Committee || 'N/A'),
-            Class: String(row.Class || 'N/A'),
-            Number: String(row.Number || 'N/A'),
+            Class: String(row['CLASS'] || 'N/A'),
+            Number: String(row['CONTACT NUMBER'] || 'N/A'),
           }))
         );
         setDelegates(delegateData);
@@ -160,6 +161,7 @@ export default function UniversalVerificationPage() {
             ID: String(row.ID || ''),
             Name: String(row.Name || ''),
             Department: String(row.Department || ''),
+            Designation: String(row.DESIGNATION || ''),
           }))
         );
         setDcMembers(dcData);
@@ -168,7 +170,7 @@ export default function UniversalVerificationPage() {
           jsonData.map((row) => ({
             ID: String(row.ID || ''),
             Name: String(row.Name || ''),
-            Department: String(row.Department || ''),
+            Designation: String(row.DESIGNATION || ''),
           }))
         );
         setEcMembers(ecData);
@@ -340,7 +342,7 @@ export default function UniversalVerificationPage() {
       case 'dc':
         return <HostMemberCard member={item.data as HostMember} />;
       case 'ec':
-        return <ECMemberCard member={item.data as HostMember} />;
+        return <ECMemberCard member={item.data as ECMember} />;
       default:
         return null;
     }
