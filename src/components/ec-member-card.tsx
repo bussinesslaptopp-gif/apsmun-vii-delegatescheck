@@ -2,12 +2,12 @@
 'use client';
 
 import { Card, CardContent } from '@/components/ui/card';
-import type { HostMember } from '@/lib/types';
+import type { ECMember } from '@/lib/types';
 import { Badge } from './ui/badge';
 import { Shield } from 'lucide-react';
 
 interface ECMemberCardProps {
-  member: HostMember;
+  member: ECMember;
 }
 
 export function ECMemberCard({ member }: ECMemberCardProps) {
@@ -26,7 +26,7 @@ export function ECMemberCard({ member }: ECMemberCardProps) {
         </h2>
         <div className="mt-4 pt-4 border-t border-primary/10 flex justify-center items-center gap-2 text-primary-foreground/80">
             <Shield className="w-4 h-4 text-green-400/80"/>
-            <span className="font-bold">Post:</span> {member.Department}
+            <span className="font-bold">Post:</span> {member.Designation}
         </div>
       </CardContent>
     </Card>
