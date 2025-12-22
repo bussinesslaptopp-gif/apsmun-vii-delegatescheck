@@ -12,12 +12,13 @@ export interface HostMember {
   ID: string;
   Name: string;
   Department: string;
+  Designation?: string; // For Post
   [key: string]: any;
 }
 
 export interface ECMember {
   ID: string;
   Name: string;
-  Post: string;
+  Designation: string; // For Post
   [key: string]: any;
 }
