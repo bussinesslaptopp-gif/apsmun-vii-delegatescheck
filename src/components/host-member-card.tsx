@@ -4,7 +4,7 @@
 import { Card, CardContent } from '@/components/ui/card';
 import type { HostMember } from '@/lib/types';
 import { Badge } from './ui/badge';
-import { Shield } from 'lucide-react';
+import { Shield, Briefcase } from 'lucide-react';
 
 interface HostMemberCardProps {
   member: HostMember;
@@ -24,9 +24,17 @@ export function HostMemberCard({ member }: HostMemberCardProps) {
         <h2 className="font-headline text-4xl text-primary-foreground font-bold uppercase tracking-wide">
           {member.Name || 'Unknown Name'}
         </h2>
-        <div className="mt-4 pt-4 border-t border-primary/10 flex justify-center items-center gap-2 text-primary-foreground/80">
-            <Shield className="w-4 h-4 text-green-400/80"/>
-            <span className="font-bold">Department:</span> {member.Department}
+        <div className="mt-4 pt-4 border-t border-primary/10 flex flex-col items-center justify-center gap-2 text-primary-foreground/80">
+            <div className="flex items-center gap-2">
+                <Briefcase className="w-4 h-4 text-green-400/80"/>
+                <span className="font-bold">Department:</span> {member.Department}
+            </div>
+            {member.Designation && (
+                 <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-green-400/80"/>
+                    <span className="font-bold">Post:</span> {member.Designation}
+                </div>
+            )}
         </div>
       </CardContent>
     </Card>
